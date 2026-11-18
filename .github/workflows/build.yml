@@ -1,0 +1,80 @@
+name: Build & Release
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install --upgrade platformio
+      - run: pio test -e native
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: esp32c3_supermini
+            chip: esp32c3
+            boot_addr: '0x0'
+          - env: esp32s3_supermini
+            chip: esp32s3
+            boot_addr: '0x0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+      - run: pip install --upgrade platformio esptool
+      - run: pio run -e ${{ matrix.env }}
+
+      # Single image flashable at 0x0 (e.g. with esptool or a web flasher).
+      # No boot_app0/otadata: partitions.csv has a single factory app.
+      - name: Merge factory image
+        run: |
+          B=.pio/build/${{ matrix.env }}
+          python -m esptool --chip ${{ matrix.chip }} merge_bin -o $B/factory.bin \
+            --flash_mode dio --flash_size 4MB \
+            ${{ matrix.boot_addr }} $B/bootloader.bin \
+            0x8000 $B/partitions.bin \
+            0x10000 $B/firmware.bin
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p out
+          VER="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || VER="dev-${GITHUB_SHA::7}"
+          B=.pio/build/${{ matrix.env }}
+          cp $B/firmware.bin out/drone_updater-${{ matrix.env }}-${VER}.bin
+          cp $B/factory.bin  out/drone_updater-${{ matrix.env }}-${VER}-factory.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: out/*
+
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: true
+          files: out/*

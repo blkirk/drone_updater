@@ -1,0 +1,54 @@
+# drone_updater config. Paste into the web page's Config box and Save, or:
+#   curl -X POST -H "Content-Type: text/plain" --data-binary @config.txt http://192.168.4.1/config
+# key=value per line. '#' or ';' starts a comment. Missing keys use defaults.
+
+# ===== You must set =====
+
+# Part of the XIAO app's advertised Bluetooth name. The bootloader name
+# "AdaDFU" is always accepted too.
+ble_name=XIAO
+
+# ===== Field tuning =====
+
+# Seconds from power-on (or last upload / config save) until flashing starts.
+# 0 = only start from the web page.
+autostart_delay=120
+
+# Ignore devices weaker than this (dBm). Raise (e.g. -75) to refuse a marginal
+# link; lower if the target is never found. -127 = no limit.
+min_rssi=-80
+
+# ESP32 Bluetooth transmit power, dBm (-24..+20). 20 = maximum range.
+tx_power=20
+
+# Seconds to search for the XIAO before giving up. 0 = search forever.
+scan_timeout=0
+
+# Flash attempts before giving up (searching doesn't count).
+retries=3
+
+# ===== Advanced =====
+
+# XIAO confirms receipt every N packets. Lower = gentler/slower,
+# higher = faster/riskier. 0 = no confirmations (not recommended).
+prn=8
+
+# 1 = big 244-byte packets (~5x faster). 0 = 20-byte packets for picky bootloaders.
+high_mtu=1
+
+#With prn=1 and high_mtu=0 it will take about 40 minutes
+#With prn=8 and high_mtu=1 it takes under 2 minutes
+
+# Seconds to wait after a failed connection / after a failure mid-update
+# (the longer wait lets a stuck bootloader reset itself).
+retry_cooldown=5
+wedge_cooldown=30
+
+# 1 = log every skipped nearby device and why (devices weaker than min_rssi
+# are never logged). Leave off in the field.
+scan_debug=0
+
+# WiFi network. Empty name = DroneDFU-XXXX. Password under 8 characters =
+# open network. WiFi changes apply after a reboot.
+wifi_ssid=
+wifi_pass=dronedfu

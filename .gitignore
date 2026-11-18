@@ -1,0 +1,26 @@
+# PlatformIO build output and IDE state
+.pio/
+.vscode/
+*.pyc
+
+# OS and editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Build artifacts and firmware images (CI publishes these as release assets)
+*.bin
+*.uf2
+*.elf
+*.map
+/out/
+
+# Firmware bundles / hex files dropped in the repo root while testing.
+# (test/fixtures/app.zip is intentionally tracked.)
+/*.zip
+/*.hex
+
+# Personal config (commit config.txt only as the documented sample)
+config.local.txt
