@@ -1,6 +1,8 @@
 #include "ble_scanner.h"
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 #include <atomic>
 #include <string.h>
@@ -29,6 +31,16 @@ Seen    s_seen[kSeenMax];
 uint8_t s_seen_count = 0;
 uint8_t s_seen_next  = 0;
 
+// Log messages queued from the NimBLE host task callback to avoid blocking
+// flash/serial I/O inside the Bluetooth controller context.
+struct SeenMsg {
+  uint8_t mac[6];
+  int16_t rssi;
+  char    name[32];
+  char    reason[8];
+};
+static QueueHandle_t s_seen_queue = nullptr;
+
 // MAC bytes are LSB-first (NimBLE / SoftDevice convention). Nordic-derived
 // bootloaders entered from an app typically advertise from the app MAC + 1.
 bool mac_match_or_plus_one(const uint8_t* addr, const NimBLEAddress* ref) {
@@ -44,7 +56,7 @@ bool mac_match_or_plus_one(const uint8_t* addr, const NimBLEAddress* ref) {
 }
 
 void log_seen(const uint8_t* mac, int rssi, const char* name, const char* reason) {
-  if (!s_debug) return;
+  if (!s_debug || !s_seen_queue) return;
   for (uint8_t i = 0; i < s_seen_count; i++) {
     if (memcmp(s_seen[i].mac, mac, 6) == 0 && strcmp(s_seen[i].reason, reason) == 0) return;
   }
@@ -53,8 +65,24 @@ void log_seen(const uint8_t* mac, int rssi, const char* name, const char* reason
   snprintf(e.reason, sizeof(e.reason), "%s", reason);
   s_seen_next = (uint8_t)((s_seen_next + 1) % kSeenMax);
   if (s_seen_count < kSeenMax) s_seen_count++;
-  logger::log("scan: %s %02X:%02X:%02X:%02X:%02X:%02X rssi=%d name='%s'", reason, mac[5],
-              mac[4], mac[3], mac[2], mac[1], mac[0], rssi, name);
+
+  SeenMsg msg;
+  memcpy(msg.mac, mac, 6);
+  msg.rssi = (int16_t)rssi;
+  snprintf(msg.name, sizeof(msg.name), "%s", name);
+  snprintf(msg.reason, sizeof(msg.reason), "%s", reason);
+  xQueueSend(s_seen_queue, &msg, 0);  // Non-blocking: drops if queue full
+}
+
+// Drain queued log items from the main task where logger::log() can safely do I/O.
+void drain_seen_log() {
+  if (!s_seen_queue) return;
+  SeenMsg msg;
+  while (xQueueReceive(s_seen_queue, &msg, 0) == pdTRUE) {
+    logger::log("scan: %s %02X:%02X:%02X:%02X:%02X:%02X rssi=%d name='%s'", msg.reason,
+                msg.mac[5], msg.mac[4], msg.mac[3], msg.mac[2], msg.mac[1], msg.mac[0],
+                (int)msg.rssi, msg.name);
+  }
 }
 
 class ScanCb : public NimBLEScanCallbacks {
@@ -100,6 +128,7 @@ void set_tx_power(int8_t dbm) {
 }
 
 void begin(int8_t tx_power_dbm) {
+  if (!s_seen_queue) s_seen_queue = xQueueCreate(16, sizeof(SeenMsg));
   logger::log("ble: START NimBLE (central only)");
   NimBLEDevice::init("");
   set_tx_power(tx_power_dbm);
@@ -127,6 +156,7 @@ bool find_first(Target* out, uint32_t timeout_ms, const char* name_filter, int8_
   s_prefer_mac  = prefer_mac;
   s_seen_count  = 0;
   s_seen_next   = 0;
+  if (s_seen_queue) xQueueReset(s_seen_queue);
 
   NimBLEScan* scan = NimBLEDevice::getScan();
   logger::log("ble: scan START (name='%s' min_rssi=%d timeout=%lu ms%s)",
@@ -139,10 +169,12 @@ bool find_first(Target* out, uint32_t timeout_ms, const char* name_filter, int8_
 
   uint32_t t0 = millis();
   while (!s_found.load(std::memory_order_acquire)) {
+    drain_seen_log();
     if (timeout_ms && millis() - t0 >= timeout_ms) break;
     delay(20);
   }
   scan->stop();
+  drain_seen_log();
   logger::log("ble: scan STOP (%s after %lu ms)",
               s_found.load() ? "target found" : "timeout", (unsigned long)(millis() - t0));
 
