@@ -4,11 +4,16 @@ Fly a tiny ESP32 board up to a hard-to-reach **Seeed XIAO nRF52840** and update 
 
 ```
 laptop ──WiFi──▶ ESP32 Super Mini (on the drone) ──Bluetooth──▶ XIAO nRF52840
-  upload zip +        stores the firmware,                       Adafruit bootloader
-  config              counts down, then flashes                  ("AdaDFU")
+  upload zip +        stores the firmware,                       oltaco OTAFIX bootloader
+  config              counts down, then flashes                  ("XIAO")
 ```
 
-Works on an **ESP32-S3 Super Mini** (RGB LED) or an **ESP32-C3 Super Mini** (blue LED). It's the ESP32 successor to [`xiao_nrf52_updater`](https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX/releases/). Instead of showing up as a USB drive, the board hosts a small WiFi web page.
+Works on an **ESP32-S3 Super Mini** (RGB LED) or an **ESP32-C3 Super Mini** (blue LED). It's the ESP32 successor to [`xiao_nrf52_updater`](https://blog.meshcore.io/2026/06/22/drone-ota). Instead of showing up as a USB drive, the board hosts a small WiFi web page.
+
+Works best with the nRF52 bootloaders from [oltaco OTAFIX](https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX/releases/). Others may work, but probably require minor changes or tuning. Example command:
+```bash
+adafruit-nrfutil --verbose dfu serial --package xiao_nrf52840_ble_bootloader-0.9.2-OTAFIX2.3-BP1.4_s140_7.3.0.zip -p /dev/tty.usbmodem1411201 -b 115200
+```
 
 ---
 
@@ -27,9 +32,10 @@ Works on an **ESP32-S3 Super Mini** (RGB LED) or an **ESP32-C3 Super Mini** (blu
 
 **In the field**
 
-5. Power the ESP32 from the drone battery. The countdown starts again from the top (`autostart_delay`, 240 s by default). Get the drone within Bluetooth range of the XIAO before it runs out.
-6. The ESP32 finds the XIAO, switches it into its bootloader, and sends the firmware. Watch the LED ([Reading the LED](#reading-the-led)).
-7. Land. **Solid green = updated.** Solid red = failed: join the WiFi again and read the log at http://192.168.4.1/log.
+5. Power the ESP32 from the drone battery. The countdown starts again from the top (`autostart_delay`, 240 s by default).
+6. Fly the drone within Bluetooth range of the XIAO board and hover for at least 3 minutes. (Test PRN and timing on the ground because this part is done in the blind.)
+7. The ESP32 finds the XIAO, switches it into its bootloader, and sends the firmware. Watch the LED ([Reading the LED](#reading-the-led)).
+8. Land. **Solid green = updated.** Solid red = failed: join the WiFi again and read the log at http://192.168.4.1/log.
 
 > The countdown restarts every time you upload or save the config, so the drone won't take off flashing while you're still editing. Press **Cancel countdown** to stay on the bench, or **Start now** to skip the wait.
 
@@ -68,9 +74,10 @@ On the C3, "solid on" means *connected* while flashing is in progress and *succe
 
 ## Preparing the XIAO
 
-- **Bootloader:** the Adafruit nRF52 bootloader. Seeed's XIAO nRF52840 ships with a compatible one (`xiao_nrf52840_ble_bootloader-*`).
+- **Bootloader:** the Adafruit nRF52 bootloader. Seeed's XIAO nRF52840 ships with a compatible one (`xiao_nrf52840_ble_bootloader-*`). This bootloader seems to only give you one chance to BLE DFU, then falls back to another DFU mode.
+- **Replace Bootloader:** these bootloaders have fixes to make BLE or OTA DFU work correctly: https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX/releases/
 - **App:** it must include the Bluefruit DFU service (`BLEDfu bledfu; bledfu.begin();` in an Adafruit Bluefruit sketch). That's what lets the ESP32 switch it into the bootloader remotely. **Without it, an over-the-air update is impossible.**
-- **Name:** its advertised Bluetooth name must contain your `ble_name`.
+- **Name:** its advertised Bluetooth name must contain some known value such as `XIAO`, update config.txt.
 
 ## Making the zip
 
@@ -209,8 +216,13 @@ test/test_native/   unit tests against a real adafruit-nrfutil zip (test/fixture
   This trades speed for reliability on a moving drone.
 - **C3 Super Mini antenna** is notoriously weak. Use `tx_power=20` and a sensible `min_rssi`. The S3 does better.
 - WiFi stays off for the whole update sequence, including an endless scan when `scan_timeout=0`.
-- Application updates only. No Secure DFU.
+- Application updates only. No Secure DFU. No bootloader DFU.
 - Log timestamps count from boot (no real-time clock).
+
+- **Caveats:**
+  - Only updates one device per cycle, per flight.
+  - Only tested with oltaco OTAFIX nRF52 bootloader and [umsh-xiao-nrf52-2026.11.15-dfu.zip](https://github.com/darconeous/umsh/releases) from the [UMSH](https://umsh.dev/) project.
+  - ESP32 places additional burden on drone battery, verify that you have head-room for this. Probably less than 200mA.
 
 ## License
 
